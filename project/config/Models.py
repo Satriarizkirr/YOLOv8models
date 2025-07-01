@@ -15,3 +15,14 @@ class Detection(Base):
     image_path = Column(String(255))
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ip_esp_32 = Column(String(55), nullable=False) 
+    ip_esp_8266 = Column(String(55), nullable=False) 
+    username = Column(String(100), nullable=False)
+    password = Column(String(100), nullable=False)  
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp())

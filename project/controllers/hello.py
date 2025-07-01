@@ -12,7 +12,7 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 from ultralytics import YOLO
 
-from project.config import Detection, create_session
+from project.config import Detection, create_session, User
 
 # Muat variabel dari file .env
 load_dotenv()
@@ -46,16 +46,12 @@ def send_log(message, log_type='INFO'):
 # 3. KONFIGURASI MODEL & VARIABEL GLOBAL
 MODEL_PATH = os.getenv('MODEL_PATH')
 MODEL_FILE = os.getenv('YOLO_MODEL_FILE')
-YOLO_CONF = float(os.getenv('YOLO_CONF_THRESHOLD', 0.40))
-YOLO_IOU = float(os.getenv('YOLO_IOU_THRESHOLD', 0.40))
+YOLO_CONF = float(os.getenv('YOLO_CONF_THRESHOLD', 0.60))
+YOLO_IOU = float(os.getenv('YOLO_IOU_THRESHOLD', 0.60))
 model = YOLO(os.path.join(MODEL_PATH, MODEL_FILE))
 
 detection_dir = os.path.join(app.static_folder)
 os.makedirs(detection_dir, exist_ok=True)
-
-ESP8266_FORWARD_URL = os.getenv('ESP8266_FORWARD_URL')
-ESP8266_STOP_URL = os.getenv('ESP8266_STOP_URL')
-ESP32CAM_CAPTURE_URL = os.getenv('ESP32CAM_CAPTURE_URL')
 
 app_state = {'is_running': False, 'process_thread': None}
 
@@ -115,22 +111,18 @@ def autonomous_loop():
         while app_state.get('is_running'):
             send_log("--- Memulai siklus baru ---", log_type='INFO')
             try:
-                if not ESP8266_STOP_URL:
-                    send_log("ESP8266_STOP_URL tidak diatur di .env", log_type='ERROR')
-                    time.sleep(10); continue
+                user = create_session().query(User).filter_by(username = "genuga").first()
 
-                requests.get(ESP8266_STOP_URL, timeout=5)
+                requests.get(user.ip_esp_8266 + "/stop", timeout=5)
                 send_log("Mengirim perintah STOP.", log_type='CMD')
                 time.sleep(5)
                 
                 if not app_state.get('is_running'): break
                 
-                if not ESP32CAM_CAPTURE_URL:
-                    send_log("ESP32CAM_CAPTURE_URL tidak diatur di .env", log_type='ERROR')
-                    time.sleep(10); continue
+                user = create_session().query(User).filter_by(username = "genuga").first()
                 
                 send_log("Mengambil gambar dari kamera...", log_type='DEBUG')
-                response = requests.get(ESP32CAM_CAPTURE_URL, timeout=10)
+                response = requests.get(user.ip_esp_32 + "/capture", timeout=10)
                 
                 if response.status_code == 200:
                     send_log("Gambar diterima, memproses...", log_type='DEBUG')
@@ -145,11 +137,9 @@ def autonomous_loop():
                 
                 if not app_state.get('is_running'): break
 
-                if not ESP8266_FORWARD_URL:
-                    send_log("ESP8266_FORWARD_URL tidak diatur di .env", log_type='ERROR')
-                    time.sleep(10); continue
+                user = create_session().query(User).filter_by(username = "genuga").first()
 
-                requests.get(ESP8266_FORWARD_URL, timeout=0.5)
+                requests.get(user.ip_esp_8266 + "/start", timeout=0.5)
                 send_log("Mengirim perintah START (maju).", log_type='CMD')
                 time.sleep(0.5)
             except requests.exceptions.RequestException as e:
@@ -165,11 +155,6 @@ def autonomous_loop():
 def start_process():
     if not app_state.get('is_running'):
         app_state['is_running'] = True
-        if not all([ESP8266_FORWARD_URL, ESP8266_STOP_URL, ESP32CAM_CAPTURE_URL]):
-            app_state['is_running'] = False
-            msg = "Konfigurasi URL untuk ESP tidak lengkap di file .env."
-            send_log(msg, log_type='ERROR')
-            return jsonify({"error": msg}), 500
         app_state['process_thread'] = threading.Thread(target=autonomous_loop)
         app_state['process_thread'].start()
         send_log("Proses berhasil dimulai oleh pengguna.", log_type='INFO')
@@ -218,6 +203,9 @@ def get_detections_history():
         return jsonify(result), 200
     finally:
         session.close()
+@app.route('/download/<filename>')
+def download_file(filename):
+    return send_from_directory(directory=app.static_folder, path=filename, as_attachment=True)
 
 @app.route('/api/delete/all', methods=['DELETE'])
 def delete_all_detections():
@@ -232,6 +220,34 @@ def delete_all_detections():
         session.rollback()
         send_log(f"Gagal menghapus data: {str(e)}", log_type='ERROR')
         return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+@app.route("/api/auth", methods=['POST'])
+def authentication():
+    session = create_session()
+    try:
+        data = request.json
+        if not data or 'username' not in data or 'password' not in data:
+            return jsonify({'error': 'Username dan password diperlukan'}), 400
+        
+        username = data['username']
+        password = data['password']
+        ip_esp_32 = data['ip_esp_32']
+        ip_esp_8266 = data['ip_esp_8266']
+        
+        user = session.query(User).filter_by(username=username, password=password).first()
+        if user:
+            user.ip_esp_32 = ip_esp_32
+            user.ip_esp_8266 = ip_esp_8266
+            user.updated_at = datetime.now()
+            session.commit()
+            return jsonify({'message': 'Login berhasil', 'ip_esp_32': user.ip_esp_32, 'ip_esp_8266': user.ip_esp_8266}), 200
+        else:
+            return jsonify({'error': 'Username atau password salah'}), 401
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': 'Terjadi kesalahan saat memproses permintaan'}), 500
     finally:
         session.close()
 
