@@ -4,6 +4,6 @@ Content-Type: application/json
 {
   "username": "genuga",
   "password": "password",
-  "ip_esp_32": "192.168.43.38",
-  "ip_esp_8266": "192.168.43.40"
+  "ip_esp_32": "192.168.43.28",
+  "ip_esp_8266": "192.168.43.38"
 }

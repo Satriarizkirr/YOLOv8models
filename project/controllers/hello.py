@@ -247,7 +247,8 @@ def authentication():
             return jsonify({'error': 'Username atau password salah'}), 401
     except Exception as e:
         session.rollback()
-        return jsonify({'error': 'Terjadi kesalahan saat memproses permintaan'}), 500
+        send_log(f"Gagal authentikasi: {str(e)}", log_type='ERROR')
+        return jsonify({'error': str(e)}), 500
     finally:
         session.close()
 
